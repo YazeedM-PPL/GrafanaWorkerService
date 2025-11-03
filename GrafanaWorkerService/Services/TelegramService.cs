@@ -7,6 +7,7 @@ using Telegram.Bot;
 using Telegram.Bot.Types;
 using System.Text.Json;
 using Newtonsoft.Json.Linq;
+using Telegram.Bot.Types.Enums;
 
 namespace GrafanaWorkerService.Services
 {
@@ -14,92 +15,114 @@ namespace GrafanaWorkerService.Services
     {
         private readonly IGrafanaImageService _grafanaImageService;
         private TelegramBotClient _bot;
-        private string _chatId;
         private readonly IConfiguration _configuration;
         private readonly ILogger<TelegramService> _logger;
 
-
-
-        public TelegramService(IGrafanaImageService grafanaImageService, IConfiguration configuration)
+        public TelegramService(
+            IGrafanaImageService grafanaImageService,
+            TelegramBotClient bot,
+            IConfiguration configuration,
+            ILogger<TelegramService> logger
+        )
         {
             _grafanaImageService = grafanaImageService;
+            _bot = bot;
             _configuration = configuration;
+            _logger = logger;
         }
 
-        public async Task SendPanelImageAlert(string panelUrl, string alertMessage)
+        public async Task SendHourlyAlert(long chatId, AlertConfig alert)
         {
-            string jsonSecretsPath = _configuration["TelegramConfig:jsonSecrets"];
-            string json = File.ReadAllText(jsonSecretsPath);
-            JObject config = JObject.Parse(json);
-            string token = config["ApiToken"]?.ToString();
-            _bot = new TelegramBotClient(token);
 
-            _chatId = _configuration["TelegramConfig:chatId"];
-            long _chatIdLong = long.Parse(_chatId);
-
-            string imageFilePath = await _grafanaImageService.GenerateImageFile(panelUrl);
+            string imageFilePath = await _grafanaImageService.GenerateImageFile(alert.Url);
 
             try
             {
                 using var stream = File.OpenRead(imageFilePath);
 
                 var result = await _bot.SendPhoto(
-                    chatId: _chatId,
+                    chatId: chatId,
                     photo: stream,
-                    caption: alertMessage
+                    caption: alert.Message
                 );
             }
             finally
             {
                 if (File.Exists(imageFilePath))
                 {
+                    _logger.LogInformation("File path: " + imageFilePath);
                     try
                     {
                         File.Delete(imageFilePath);
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Failed to delete image file: {ex.Message}");
+                        _logger.LogError(ex, "Failed to delete image file");
                     }
                 }
             }
         }
 
-        public async Task TestAlerts()
+        public async Task SendImageMessage(long chatId, string panelUrl, string message)
         {
-            string filePath = _configuration["TelegramConfig:hourlyAlertStore"];
-            string _apiKey = _configuration["TelegramConfig:botToken"];
+            string imageFilePath = await _grafanaImageService.GenerateImageFile(panelUrl);
+            Console.WriteLine("\nAbout to send message: " + message);
 
-            _logger.LogInformation($" LOG FILE PATH: {filePath}");
-            _logger.LogInformation($" API KEY: {_apiKey}");
-
-            _logger.LogInformation("Base Directory: {dir}", AppContext.BaseDirectory);
-            _logger.LogInformation("Current Directory: {dir}", Directory.GetCurrentDirectory());
-
-
-            string json = File.ReadAllText(filePath);
-            List<TelegramHourlyAlert> hourlyAlerts = JsonConvert.DeserializeObject<List<TelegramHourlyAlert>>(json);
-
-            _logger.LogInformation("Sending test alerts.....");
-
-            foreach (var alert in hourlyAlerts)
+            try
             {
-                await SendPanelImageAlert(alert.panelUrl, alert.alertMessage);
-                Thread.Sleep(60000); // 60000 milliseconds = 1 minute
-                _logger.LogInformation($"Alert sent: {alert.alertMessage}");
+                using var stream = File.OpenRead(imageFilePath);
+                var result = await _bot.SendPhoto(
+                    chatId: chatId,
+                    photo: stream,
+                    caption: message,
+                    ParseMode.Html
+                );
+            }
+            catch(Exception e)
+            {
+                if (File.Exists(imageFilePath))
+                {
+                    _logger.LogInformation("File path: " + imageFilePath);
+                    try
+                    {
+                        File.Delete(imageFilePath);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to delete image file");
+                    }
+                }
+            }
+
+        }
+
+        public async Task SendMessage(long chatId, string message)
+        {
+            try
+            {
+                await _bot.SendMessage(chatId, message, ParseMode.Html);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to send message");
             }
         }
 
-        public async Task SendTestMessage()
+        public bool IsWithinAlertWindow(GroupChatConfig group)
         {
-            string jsonSecretsPath = _configuration["TelegramConfig:pathToSecrets"];
+            int currentHour = DateTime.Now.Hour;
 
-            string json = File.ReadAllText(jsonSecretsPath);
-            JObject config = JObject.Parse(json);
-            string token = config["ApiToken"]?.ToString();
-            _bot = new TelegramBotClient(token);
-            _chatId = _configuration["TelegramConfig:chatId"];
-            await _bot.SendMessage(_chatId, "test");
+            // Handle same-day window
+            if (group.StartHour <= group.EndHour)
+            {
+                return currentHour >= group.StartHour && currentHour < group.EndHour;
+            }
+            // Handle overnight window (e.g., 22 to 6)
+            else
+            {
+                return currentHour >= group.StartHour || currentHour < group.EndHour;
+            }
+
         }
 
     }
