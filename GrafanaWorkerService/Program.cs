@@ -1,6 +1,7 @@
 using GrafanaWorkerService.Interfaces;
 using GrafanaWorkerService.Services;
 using Microsoft.AspNetCore.Builder;
+using GrafanaWorkerService.Services.Factories;
 using Serilog;
 
 namespace GrafanaWorkerService
@@ -24,9 +25,12 @@ namespace GrafanaWorkerService
 
             builder.Host.UseSerilog();
 
+            builder.Services.AddSingleton<IAlertService, AlertService>();
             builder.Services.AddHttpClient<IGrafanaImageService, GrafanaImageService>();
 
-            builder.Services.AddSingleton<ITelegramService, TelegramService>();
+            builder.Services.AddTelegramBots(builder.Configuration, Log.Logger);
+
+            builder.Services.AddHostedService<TelegramBotListener>();
 
 
             var host = builder.Build();
@@ -40,3 +44,5 @@ namespace GrafanaWorkerService
 
 
 // sc.exe create "GrafanaWorkerService" binPath= "C:\Users\yazeedm\YAZEED\MyProjects\GrafanaWorkerService\Precompiled\GrafanaWorkerService.exe" DisplayName= "Grafana Worker Service" start= auto
+
+// sc.exe create "GrafanaWorkerService" binPath= "C:\GrafanaWorkerService\Precompiled\GrafanaWorkerService.exe" DisplayName= "GrafanaWorkerService" start=auto

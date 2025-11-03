@@ -12,24 +12,27 @@ namespace GrafanaWorkerService.Controllers
     {
 
         private readonly ITelegramService _telegramService;
+        private readonly IAlertService _alertService;
 
-        public TelegramController(ITelegramService telegramService)
+        public TelegramController(
+            ITelegramService telegramService,
+            IAlertService alertService)
         {
             _telegramService = telegramService;
-        }
-
-        [HttpGet("SendTestAlerts")]
-        public IActionResult Test()
-        {
-            _telegramService.TestAlerts();
-            return Ok("Hello from MyController!");
+            _alertService = alertService;
         }
 
         [HttpGet("SendTestMessage")]
-        public IActionResult SendTestMessage()
+        public async Task SendTestMessage(long chatId, string panelUrl, string message)
         {
-            _telegramService.SendTestMessage();
-            return Ok("Test message sent");
+            Console.WriteLine("Webhook contacted");
+            await _telegramService.SendImageMessage(chatId, panelUrl, message);
+        }
+
+        [HttpGet("TriggerHourlyAlerts")]
+        public async Task TriggerHourlyAlerts()
+        {
+            await _alertService.TriggerHourlyAlerts(new System.Threading.CancellationToken());
         }
 
     }
